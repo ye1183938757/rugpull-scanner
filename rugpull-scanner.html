@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://token-plan-cn.xiaomimimo.com https://api.etherscan.io https://api.bscscan.com https://api.polygonscan.com https://api.arbiscan.io https://api.basescan.org https://api.snowtrace.io; img-src 'self' data:;">
+  <title>多链 Rugpull 与蜜罐风险扫描仪</title>
+
+  <!-- highlight.js 暗黑主题 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+
+  <!-- Tailwind CSS Play CDN（运行时动态生成 CSS，非 link 标签） -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0f172a', 50: '#1e293b', 100: '#334155' }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- ECharts -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <!-- marked.js (Markdown 渲染) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- highlight.js 完整版 + Solidity 语法 -->
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlightjs-solidity@2.0.6/dist/solidity.min.js"></script>
+  <!-- DOMPurify：HTML 净化，防 XSS -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+
+  <style>
+    body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1.5rem; }
+    .card-red { border-left: 4px solid #ef4444; }
+    .card-green { border-left: 4px solid #22c55e; }
+    #results-panel { display: none; }
+    .progress-bar { transition: width 0.3s ease; }
+    .btn-primary { background: linear-gradient(135deg, #3b82f6, #8b5cf6); }
+    .btn-primary:hover { background: linear-gradient(135deg, #2563eb, #7c3aed); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .tab-active { border-bottom: 2px solid #3b82f6; color: #3b82f6; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #94a3b8; }
+    .tab-inactive:hover { color: #e2e8f0; }
+    .report-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0; }
+    .report-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.75rem 0; color: #93c5fd; }
+    .report-content h3 { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; }
+    .report-content blockquote { border-left: 3px solid #3b82f6; padding-left: 1rem; color: #94a3b8; margin: 0.5rem 0; }
+    .report-content pre { border-radius: 0.5rem; padding: 1rem; overflow-x: auto; margin: 0.5rem 0; }
+    .report-content ul, .report-content ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+    .report-content li { margin: 0.25rem 0; }
+    .report-content p { margin: 0.5rem 0; line-height: 1.7; }
+    .report-content strong { color: #fbbf24; }
+    .security-warning { border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
+    /* 红绿卡片内容强制换行，防止代码溢出 */
+    .card-red pre, .card-green pre {
+      white-space: pre-wrap;       /* 保留空白符但允许换行 */
+      word-wrap: break-word;       /* 长单词/长标识符强制断行 */
+      overflow-wrap: break-word;
+      word-break: break-all;       /* 极长无空格字符串强制断行 */
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+    .card-red code, .card-green code {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      word-break: break-all;
+    }
+    .card-red p, .card-green p, .card-red h3, .card-green h3 {
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <!-- ===== HEADER ===== -->
+  <header class="border-b border-gray-800 px-6 py-4">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+          🔍 多链 Rugpull 与蜜罐风险扫描仪
+        </h1>
+        <p class="text-sm text-gray-500 mt-1">Powered by MiMo-V2.5-Pro · 支持 ETH / BSC / Polygon / Arbitrum / Base / Avalanche</p>
+      </div>
+      <button id="btn-settings" class="text-gray-400 hover:text-white transition" title="API Key 设置">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== SETTINGS MODAL ===== -->
+  <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="card w-full max-w-md mx-4">
+      <h2 class="text-lg font-semibold mb-4">⚙️ API Key 配置</h2>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">小米 MiMo API Key <span class="text-red-400">*</span></label>
+          <input id="input-mimo-key" type="password" placeholder="tp-..." class="w-full bg-surface-50 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Etherscan API Key <span class="text-gray-600">(可选)</span></label>
+          <input id="input-etherscan-key" type="password" placeholder="免费注册: etherscan.io/apis" class="w-full bg-surface-50 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="input-session-only" type="checkbox" class="w-4 h-4 rounded bg-surface-50 border-gray-700">
+          <label for="input-session-only" class="text-sm text-gray-400">🔒 会话级存储（关闭标签页自动清除 Key，更安全）</label>
+        </div>
+        <div class="security-warning rounded-lg p-3 text-sm text-red-400">
+          ⚠️ 安全警告：API Key 存储在本地浏览器中，请仅在本地双击运行、localhost 或您完全私有的独立域名下使用。切勿在公共多用户共享域名下运行，以防您的 Credit 资产被 XSS 脚本窃取！
+        </div>
+      </div>
+      <div class="flex justify-between items-center mt-6">
+        <button id="btn-clear-cache" class="px-4 py-2 text-sm text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg transition">🗑️ 清除缓存并退出</button>
+        <div class="flex gap-3">
+          <button id="btn-settings-cancel" class="px-4 py-2 text-sm text-gray-400 hover:text-white transition">取消</button>
+          <button id="btn-settings-save" class="btn-primary px-4 py-2 text-sm text-white rounded-lg">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="max-w-7xl mx-auto px-6 py-8">
+    <!-- Input Panel -->
+    <div class="card mb-6">
+      <!-- Tabs -->
+      <div class="flex gap-6 mb-4 border-b border-gray-700 pb-2">
+        <button class="tab-active pb-2 text-sm font-medium" data-tab="auto">🔗 自动拉取</button>
+        <button class="tab-inactive pb-2 text-sm font-medium" data-tab="manual">📋 手动粘贴</button>
+      </div>
+
+      <!-- Auto Fetch Tab -->
+      <div id="tab-auto">
+        <div class="flex gap-4 mb-4">
+          <select id="select-chain" class="bg-surface-50 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option value="1">Ethereum</option>
+            <option value="56">BSC</option>
+            <option value="137">Polygon</option>
+            <option value="42161">Arbitrum</option>
+            <option value="8453">Base</option>
+            <option value="43114">Avalanche</option>
+          </select>
+          <input id="input-address" type="text" placeholder="输入合约地址 0x..." class="flex-1 bg-surface-50 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+      </div>
+
+      <!-- Manual Paste Tab -->
+      <div id="tab-manual" class="hidden">
+        <textarea id="input-source" rows="12" placeholder="粘贴 Solidity 源码...&#10;&#10;支持多文件，用 === File: xxx.sol === 分隔" class="w-full bg-surface-50 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500 resize-y"></textarea>
+        <button id="btn-add-file" class="mt-2 text-sm text-blue-400 hover:text-blue-300 transition">+ 添加更多文件</button>
+      </div>
+
+      <!-- Scan Button -->
+      <div class="mt-4 flex items-center gap-4">
+        <button id="btn-scan" class="btn-primary px-6 py-2.5 text-sm font-medium text-white rounded-lg">
+          🚀 开始扫描
+        </button>
+        <div id="scan-progress" class="flex-1 hidden">
+          <div class="flex items-center gap-3">
+            <div class="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+              <div id="progress-bar" class="progress-bar h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full" style="width: 0%"></div>
+            </div>
+            <span id="progress-text" class="text-xs text-gray-400 whitespace-nowrap"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Panel -->
+    <div id="results-panel">
+      <!-- Warning Banner -->
+      <div id="warning-banner" class="hidden bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-4 py-3 mb-6 text-sm text-yellow-400">
+        ⚠️ <span id="warning-text"></span>
+      </div>
+
+      <!-- Charts Row -->
+      <div id="charts-row" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="card flex items-center justify-center" style="min-height: 420px;">
+          <div id="radar-chart" style="width: 100%; height: 100%; min-height: 400px;"></div>
+        </div>
+        <div class="card flex items-center justify-center" style="min-height: 420px;">
+          <div id="gauge-chart" style="width: 100%; height: 100%; min-height: 400px;"></div>
+        </div>
+      </div>
+
+      <!-- Red/Green Cards -->
+      <div id="cards-container" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"></div>
+
+      <!-- Markdown Report -->
+      <div class="card">
+        <h2 class="text-lg font-semibold mb-4">📄 详细审计报告</h2>
+        <div id="report-content" class="report-content prose prose-invert max-w-none"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="border-t border-gray-800 px-6 py-6 mt-12">
+    <div class="max-w-7xl mx-auto">
+      <div class="security-warning rounded-lg p-3 text-sm text-red-400 mb-4">
+        ⚠️ 安全警告：API Key 存储在本地浏览器中，请仅在本地双击运行、localhost 或您完全私有的独立域名下使用。切勿在公共多用户共享域名下运行，以防您的 Credit 资产被 XSS 脚本窃取！
+      </div>
+      <p class="text-xs text-gray-600 text-center">
+        免责声明：本工具仅供参考，不构成任何投资建议。智能合约审计结果可能存在误判，请结合专业安全团队的人工审计。
+      </p>
+    </div>
+  </footer>
+
+  <!-- ===== APPLICATION LOGIC ===== -->
+  <script>
+  (function() {
+    'use strict';
+
+    // ===== [1] Config & Constants =====
+    const CONFIG = {
+      MIMO_API_BASE: 'https://token-plan-cn.xiaomimimo.com/v1',
+      MIMO_MODEL: 'mimo-v2.5-pro',
+      MAX_RETRIES: 3,
+      RETRY_DELAY: 1000,
+      TOKEN_WARN_THRESHOLD: 900000
+    };
+
+    const CHAIN_CONFIG = {
+      1:     { host: 'api.etherscan.io',     name: 'Ethereum' },
+      56:    { host: 'api.bscscan.com',      name: 'BSC' },
+      137:   { host: 'api.polygonscan.com',  name: 'Polygon' },
+      42161: { host: 'api.arbiscan.io',      name: 'Arbitrum' },
+      8453:  { host: 'api.basescan.org',     name: 'Base' },
+      43114: { host: 'api.snowtrace.io',     name: 'Avalanche' }
+    };
+
+    const STORAGE_KEYS = {
+      MIMO_KEY: 'rugscan_mimo_key',
+      ETHERSCAN_KEY: 'rugscan_etherscan_key',
+      CHAIN: 'rugscan_default_chain',
+      SESSION_ONLY: 'rugscan_session_only'
+    };
+
+    // ===== [2] Storage Module =====
+    const Storage = {
+      _isSessionOnly() {
+        return localStorage.getItem(STORAGE_KEYS.SESSION_ONLY) === 'true';
+      },
+      _getStore(key) {
+        // 会话级密钥存 sessionStorage，其余存 localStorage
+        if (this._isSessionOnly() && (key === STORAGE_KEYS.MIMO_KEY || key === STORAGE_KEYS.ETHERSCAN_KEY)) {
+          return sessionStorage;
+        }
+        return localStorage;
+      },
+      save(key, value) {
+        try { this._getStore(key).setItem(key, value); }
+        catch (e) { console.warn('存储写入失败:', e); }
+      },
+      load(key, fallback = '') {
+        try {
+          // 优先读 localStorage，其次 sessionStorage
+          return localStorage.getItem(key) || sessionStorage.getItem(key) || fallback;
+        }
+        catch (e) { return fallback; }
+      },
+      saveConfig(config) {
+        this.save(STORAGE_KEYS.MIMO_KEY, config.mimoApiKey);
+        this.save(STORAGE_KEYS.ETHERSCAN_KEY, config.etherscanKey);
+        this.save(STORAGE_KEYS.CHAIN, String(config.selectedChain));
+      },
+      loadConfig() {
+        return {
+          mimoApiKey: this.load(STORAGE_KEYS.MIMO_KEY),
+          etherscanKey: this.load(STORAGE_KEYS.ETHERSCAN_KEY),
+          selectedChain: parseInt(this.load(STORAGE_KEYS.CHAIN, '1')),
+          sessionOnly: this._isSessionOnly()
+        };
+      }
+    };
+
+    const AppState = {
+      config: Storage.loadConfig(),
+      scan: {
+        status: 'idle',
+        progress: '',
+        contractFiles: {},
+        mergedSource: '',
+        aiResponse: null,
+        parsedResult: null,
+        error: null,
+        renderMode: 'json'
+      },
+      charts: null
+    };
+
+    // ===== Settings Modal =====
+    const settingsModal = document.getElementById('settings-modal');
+    const btnSettings = document.getElementById('btn-settings');
+    const btnCancel = document.getElementById('btn-settings-cancel');
+    const btnSave = document.getElementById('btn-settings-save');
+    const inputMimoKey = document.getElementById('input-mimo-key');
+    const inputEtherscanKey = document.getElementById('input-etherscan-key');
+
+    const inputSessionOnly = document.getElementById('input-session-only');
+
+    btnSettings.addEventListener('click', () => {
+      inputMimoKey.value = AppState.config.mimoApiKey;
+      inputEtherscanKey.value = AppState.config.etherscanKey;
+      inputSessionOnly.checked = AppState.config.sessionOnly || false;
+      settingsModal.classList.remove('hidden');
+    });
+
+    btnCancel.addEventListener('click', () => {
+      settingsModal.classList.add('hidden');
+    });
+
+    btnSave.addEventListener('click', () => {
+      // 先设置 sessionOnly 标志，再保存 Key
+      AppState.config.sessionOnly = inputSessionOnly.checked;
+      localStorage.setItem(STORAGE_KEYS.SESSION_ONLY, String(inputSessionOnly.checked));
+      AppState.config.mimoApiKey = inputMimoKey.value.trim();
+      AppState.config.etherscanKey = inputEtherscanKey.value.trim();
+      Storage.saveConfig(AppState.config);
+      settingsModal.classList.add('hidden');
+    });
+
+    settingsModal.addEventListener('click', (e) => {
+      if (e.target === settingsModal) settingsModal.classList.add('hidden');
+    });
+
+    // 清除缓存并退出
+    document.getElementById('btn-clear-cache').addEventListener('click', () => {
+      if (confirm('确定要清除所有本地存储的 API Key 吗？清除后页面将自动刷新。')) {
+        localStorage.removeItem(STORAGE_KEYS.MIMO_KEY);
+        localStorage.removeItem(STORAGE_KEYS.ETHERSCAN_KEY);
+        localStorage.removeItem(STORAGE_KEYS.CHAIN);
+        localStorage.removeItem(STORAGE_KEYS.SESSION_ONLY);
+        sessionStorage.clear();
+        location.reload();
+      }
+    });
+
+    // ===== [3] API Client =====
+    const API = {
+      async fetchWithRetry(url, options = {}, retries = CONFIG.MAX_RETRIES, delay = CONFIG.RETRY_DELAY) {
+        try {
+          const response = await fetch(url, options);
+          if (response.status === 429 && retries > 0) {
+            console.warn(`触发限流(429)，${delay}ms 后重试...`);
+            await new Promise(r => setTimeout(r, delay));
+            return this.fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          return response;
+        } catch (error) {
+          if (error instanceof TypeError && error.message === 'Failed to fetch') {
+            throw new Error('网络连接失败，请检查网络状态、小米 API 网关地址或代理软件');
+          }
+          if (retries > 0) {
+            await new Promise(r => setTimeout(r, delay));
+            return this.fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          throw error;
+        }
+      },
+
+      async callMiMo(messages) {
+        const resp = await this.fetchWithRetry(
+          `${CONFIG.MIMO_API_BASE}/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'api-key': AppState.config.mimoApiKey
+            },
+            body: JSON.stringify({
+              model: CONFIG.MIMO_MODEL,
+              messages: messages,
+              temperature: 0.1,
+              max_tokens: 16384
+            })
+          }
+        );
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          throw new Error(`MiMo API 请求失败 (${resp.status}): ${errText}`);
+        }
+        const data = await resp.json();
+        return {
+          content: data.choices?.[0]?.message?.content || '',
+          reasoning_content: data.choices?.[0]?.message?.reasoning_content || ''
+        };
+      },
+
+      async fetchContractSource(chainId, address) {
+        const chain = CHAIN_CONFIG[chainId];
+        if (!chain) throw new Error(`不支持的链: ${chainId}`);
+        const etherscanKey = AppState.config.etherscanKey;
+        if (!etherscanKey) {
+          UI.updateProgress('正在尝试匿名提取源码...（提示：匿名提取极易限流，如报错请配置免费 Etherscan API Key）');
+        }
+        const url = `https://${chain.host}/api?module=contract&action=getsourcecode`
+                  + `&address=${address}&apikey=${etherscanKey || ''}`;
+        const resp = await this.fetchWithRetry(url);
+        const json = await resp.json();
+        if (json.status !== '1' || !json.result?.[0]?.SourceCode) {
+          const msg = json.message || json.result || '未知错误';
+          // 匿名模式常见错误提示
+          const hint = !etherscanKey
+            ? '。提示：匿名模式限制严格，建议在设置中配置免费的 Etherscan API Key'
+            : '';
+          throw new Error(`获取合约源码失败: ${msg}${hint}`);
+        }
+        const source = json.result[0].SourceCode;
+        if (source.startsWith('{{') && source.endsWith('}}')) {
+          try {
+            const parsed = JSON.parse(source.slice(1, -1));
+            const files = {};
+            if (parsed.sources && typeof parsed.sources === 'object') {
+              for (const [filePath, fileObj] of Object.entries(parsed.sources)) {
+                files[filePath] = (fileObj && typeof fileObj.content === 'string') ? fileObj.content : '';
+              }
+            }
+            if (Object.keys(files).length > 0) return files;
+            // sources 为空时降级为单文件
+            return { 'Contract.sol': source };
+          } catch (e) {
+            console.warn('Standard JSON Input 解析失败，降级为单文件:', e);
+            return { 'Contract.sol': source };
+          }
+        }
+        return { 'Contract.sol': source };
+      }
+    };
+
+    // ===== [4] Contract Parser =====
+    const Parser = {
+      parseImports(source) {
+        const cleanSource = source
+          .replace(/\/\/.*/g, '')
+          .replace(/\/\*[\s\S]*?\*\//g, '');
+        const imports = [];
+        // 支持所有 Solidity import 语法：
+        // import "file"; import {X} from "file"; import * as X from "file"; import X from "file"
+        const regex = /import\s+(?:(?:{[^}]+}|\*\s+as\s+\w+|\w+)\s+from\s+)?["']([^"']+)["']/g;
+        let match;
+        while ((match = regex.exec(cleanSource)) !== null) {
+          imports.push(match[1]);
+        }
+        return imports;
+      },
+
+      resolveImportPath(importPath, fileKeys) {
+        // 优先：精确全路径匹配（如 @openzeppelin/contracts/token/ERC20/ERC20.sol）
+        if (fileKeys.includes(importPath)) return importPath;
+        // 次优先：import 路径的后半段与 fileKey 尾部完全匹配
+        const normalized = importPath.replace(/^\.\//, '');
+        const exact = fileKeys.find(k => k.endsWith('/' + normalized) || k === normalized);
+        if (exact) return exact;
+        // 最后兜底：仅文件名匹配（可能误配，记录警告）
+        const fileName = importPath.split('/').pop();
+        const candidates = fileKeys.filter(k => k.endsWith('/' + fileName) || k === fileName);
+        if (candidates.length === 1) return candidates[0];
+        if (candidates.length > 1) {
+          console.warn(`import "${importPath}" 匹配到多个文件，选择第一个:`, candidates);
+          return candidates[0];
+        }
+        return null;
+      },
+
+      topologicalSort(files) {
+        const order = [];
+        const state = {};
+        const fileKeys = Object.keys(files);
+        let hasCycle = false;
+        const cycleFiles = [];
+
+        const visit = (file) => {
+          if (state[file] === 1) {
+            // 检测到循环：记录警告并跳过，不中断
+            hasCycle = true;
+            cycleFiles.push(file);
+            return;
+          }
+          if (state[file] === 2) return;
+          state[file] = 1;
+          for (const imp of this.parseImports(files[file] || '')) {
+            const resolved = this.resolveImportPath(imp, fileKeys);
+            if (resolved) visit(resolved);
+          }
+          state[file] = 2;
+          order.push(file);
+        };
+
+        for (const file of fileKeys) {
+          if (!state[file]) visit(file);
+        }
+
+        if (hasCycle) {
+          console.warn('检测到循环依赖（已降级处理）:', cycleFiles);
+          // 补充遗漏的文件（因循环跳过的）
+          for (const file of fileKeys) {
+            if (!order.includes(file)) order.push(file);
+          }
+        }
+        return order;
+      },
+
+      mergeFiles(files) {
+        const order = this.topologicalSort(files);
+        let merged = '';
+        for (const filePath of order) {
+          merged += `\n// ===== File: ${filePath} =====\n`;
+          merged += files[filePath] + '\n';
+        }
+        return merged.trim();
+      },
+
+      estimateTokens(text) {
+        return Math.ceil(text.length / 2.5);
+      },
+
+      parseManualInput(text) {
+        const files = {};
+        const regex = /===\s*File:\s*(.+?)\s*===/g;
+        const parts = text.split(regex);
+        if (parts.length <= 1) {
+          return { 'Contract.sol': text };
+        }
+        for (let i = 1; i < parts.length; i += 2) {
+          const fileName = parts[i].trim();
+          const content = (parts[i + 1] || '').trim();
+          if (fileName && content) {
+            files[fileName] = content;
+          }
+        }
+        return Object.keys(files).length > 0 ? files : { 'Contract.sol': text };
+      }
+    };
+
+    // ===== [5] AI Analyzer =====
+    const Analyzer = {
+      SYSTEM_PROMPT: `你是一名专业的智能合约安全审计师，精通 Solidity 语言和 EVM 虚拟机。
+
+【思维链强制指令】
+在输出任何 JSON 字段之前，你必须使用思维链（Thinking）将合约的每一行代码、每一个外部调用路径、每一个修饰符进行最少 3 轮的对抗性攻击模拟（模拟黑客如何利用重入、利用所有权漏洞、利用闪电贷等）。在思维链推演完毕后，再将最终确凿的审计结论序列化为 JSON 格式输出。
+
+【知识截止日期】知识截止：2024年12月
+
+【输出格式】严格输出以下 JSON，不要包含任何其他文本、markdown 代码块标记或解释：
+
+{
+  "risk_score": 0-100的整数,
+  "risk_level": "CRITICAL或HIGH或MEDIUM或LOW或SAFE",
+  "summary": "一句话结论",
+  "red_flags": [
+    {
+      "title": "风险标题",
+      "severity": "CRITICAL或HIGH或MEDIUM或LOW",
+      "description": "详细说明",
+      "code_snippet": "相关代码片段",
+      "recommendation": "修复建议"
+    }
+  ],
+  "green_passes": [
+    {
+      "title": "安全项标题",
+      "description": "说明"
+    }
+  ],
+  "category_scores": {
+    "honeypot_risk": 0-100,
+    "rugpull_risk": 0-100,
+    "owner_privilege": 0-100,
+    "liquidity_risk": 0-100,
+    "code_quality": 0-100
+  }
+}
+
+【评分公式约束】
+overall_score = min(100, Σ(wi * si))
+- honeypot_risk: 发现蜜罐逻辑（如无法卖出、动态税率、隐藏后门）→ 强制 100 分
+- owner_privilege: 发现隐藏所有权转移、无限增发、动态黑白名单 → 强制 ≥80 分
+- rugpull_risk: 发现抽 Rugpull 机制（如 owner 可随时提走流动性）→ 强制 ≥80 分
+- 5 维评分必须与 red_flags 中的发现严格一致，禁止自相矛盾
+- risk_score 应等于 5 维 category_scores 的加权平均
+
+【禁止事项】
+- 不要在 JSON 中包含任何 Markdown 审计报告字段
+- 不要输出 markdown 代码块标记（如 \`\`\`json）
+- 不要在 JSON 之外输出任何额外文本`,
+
+      // 源码清洗：剥离注释防止提示词注入攻击
+      sanitizeSource(source) {
+        return source
+          .replace(/\/\*[\s\S]*?\*\//g, '')  // 多行注释
+          .replace(/\/\/.*/g, '');            // 单行注释
+      },
+
+      buildUserMessage(mergedSource) {
+        const sanitized = this.sanitizeSource(mergedSource);
+        return `请审计以下智能合约源码：\n\n${sanitized}`;
+      },
+
+      // 数值 clamp 工具
+      clamp(val, min, max) {
+        const n = Number(val);
+        if (isNaN(n)) return min;
+        return Math.max(min, Math.min(max, Math.round(n)));
+      },
+
+      parseResponse(rawText) {
+        let parsed;
+        try {
+          const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                            rawText.match(/```\s*([\s\S]*?)\s*```/) ||
+                            [null, rawText];
+          parsed = JSON.parse(jsonMatch[1].trim());
+        } catch (e) {
+          return { mode: 'markdown', data: null, raw: rawText, error: 'JSON 解析失败' };
+        }
+
+        // 字段存在性检查
+        const required = ['risk_score', 'risk_level', 'summary', 'red_flags', 'green_passes', 'category_scores'];
+        const missing = required.filter(k => parsed[k] === undefined);
+        if (missing.length > 0) {
+          return { mode: 'markdown', data: null, raw: rawText, error: `JSON 缺失字段: ${missing.join(', ')}` };
+        }
+
+        // 类型守卫：字段类型校验
+        if (!Array.isArray(parsed.red_flags)) {
+          return { mode: 'markdown', data: null, raw: rawText, error: 'red_flags 必须是数组' };
+        }
+        if (!Array.isArray(parsed.green_passes)) {
+          return { mode: 'markdown', data: null, raw: rawText, error: 'green_passes 必须是数组' };
+        }
+        if (typeof parsed.category_scores !== 'object' || parsed.category_scores === null) {
+          return { mode: 'markdown', data: null, raw: rawText, error: 'category_scores 必须是对象' };
+        }
+
+        // 数值 clamp：risk_score 0-100 整数
+        parsed.risk_score = this.clamp(parsed.risk_score, 0, 100);
+
+        // risk_level 允许集合校验
+        const validLevels = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'SAFE'];
+        if (!validLevels.includes(parsed.risk_level)) {
+          parsed.risk_level = parsed.risk_score >= 80 ? 'CRITICAL' : parsed.risk_score >= 60 ? 'HIGH' : parsed.risk_score >= 40 ? 'MEDIUM' : parsed.risk_score >= 20 ? 'LOW' : 'SAFE';
+        }
+
+        // summary 确保为字符串
+        if (typeof parsed.summary !== 'string') parsed.summary = String(parsed.summary || '');
+
+        // category_scores 数值 clamp
+        const defaultScores = { honeypot_risk: 50, rugpull_risk: 50, owner_privilege: 50, liquidity_risk: 50, code_quality: 50 };
+        for (const key of Object.keys(defaultScores)) {
+          parsed.category_scores[key] = this.clamp(parsed.category_scores[key] ?? defaultScores[key], 0, 100);
+        }
+        // 移除 category_scores 中的非预期字段
+        parsed.category_scores = {
+          honeypot_risk: parsed.category_scores.honeypot_risk,
+          rugpull_risk: parsed.category_scores.rugpull_risk,
+          owner_privilege: parsed.category_scores.owner_privilege,
+          liquidity_risk: parsed.category_scores.liquidity_risk,
+          code_quality: parsed.category_scores.code_quality
+        };
+
+        // red_flags 字段类型加固
+        const validSeverities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+        parsed.red_flags = parsed.red_flags.map(f => ({
+          title: typeof f.title === 'string' ? f.title : String(f.title || ''),
+          severity: validSeverities.includes(f.severity) ? f.severity : 'MEDIUM',
+          description: typeof f.description === 'string' ? f.description : String(f.description || ''),
+          code_snippet: typeof f.code_snippet === 'string' ? f.code_snippet : '',
+          recommendation: typeof f.recommendation === 'string' ? f.recommendation : String(f.recommendation || '')
+        }));
+
+        // green_passes 字段类型加固
+        parsed.green_passes = parsed.green_passes.map(p => ({
+          title: typeof p.title === 'string' ? p.title : String(p.title || ''),
+          description: typeof p.description === 'string' ? p.description : String(p.description || '')
+        }));
+
+        // 评分一致性强制校验：risk_score 必须等于 5 维加权平均
+        const cs = parsed.category_scores;
+        const weights = { honeypot_risk: 0.25, rugpull_risk: 0.25, owner_privilege: 0.2, liquidity_risk: 0.15, code_quality: 0.15 };
+        const computedScore = Math.round(
+          cs.honeypot_risk * weights.honeypot_risk +
+          cs.rugpull_risk * weights.rugpull_risk +
+          cs.owner_privilege * weights.owner_privilege +
+          cs.liquidity_risk * weights.liquidity_risk +
+          cs.code_quality * weights.code_quality
+        );
+        // 如果模型输出的 risk_score 与计算值偏差超过 15 分，强制重算
+        if (Math.abs(parsed.risk_score - computedScore) > 15) {
+          console.warn(`评分不一致：模型输出 ${parsed.risk_score}，加权计算 ${computedScore}，已自动修正`);
+          parsed.risk_score = computedScore;
+        }
+        // risk_level 与 risk_score 强制一致
+        parsed.risk_level = parsed.risk_score >= 80 ? 'CRITICAL' : parsed.risk_score >= 60 ? 'HIGH' : parsed.risk_score >= 40 ? 'MEDIUM' : parsed.risk_score >= 20 ? 'LOW' : 'SAFE';
+
+        return { mode: 'json', data: parsed, raw: rawText, error: null };
+      },
+
+      async scan(mergedSource) {
+        const messages = [
+          { role: 'system', content: this.SYSTEM_PROMPT },
+          { role: 'user', content: this.buildUserMessage(mergedSource) }
+        ];
+        const response = await API.callMiMo(messages);
+        AppState.lastReasoningContent = response.reasoning_content;
+        return this.parseResponse(response.content);
+      }
+    };
+
+    // ===== [6] ECharts Visualization =====
+    const Charts = {
+      init() {
+        try {
+          ['radar-chart', 'gauge-chart'].forEach(id => {
+            const dom = document.getElementById(id);
+            if (echarts.getInstanceByDom(dom)) echarts.dispose(dom);
+          });
+          const radarDom = document.getElementById('radar-chart');
+          const gaugeDom = document.getElementById('gauge-chart');
+          const radar = echarts.init(radarDom, 'dark');
+          const gauge = echarts.init(gaugeDom, 'dark');
+          // 初始化后强制 resize 以正确填充容器
+          setTimeout(() => { radar.resize(); gauge.resize(); }, 50);
+          return { radar, gauge };
+        } catch (e) {
+          console.error('ECharts 初始化失败，降级为纯文本模式', e);
+          return null;
+        }
+      },
+
+      safeRender(chart, option) {
+        try {
+          chart.setOption(option, true);
+          // 渲染后触发 resize 确保正确填充容器
+          setTimeout(() => chart.resize(), 30);
+        } catch (e) {
+          console.error('ECharts 渲染失败', e);
+          chart.clear();
+          chart.setOption({ title: { text: '图表渲染失败', subtext: '请刷新页面重试', left: 'center' } });
+        }
+      },
+
+      renderRadar(chart, scores) {
+        const option = {
+          title: { text: '风险维度雷达图', left: 'center', textStyle: { fontSize: 14 } },
+          tooltip: {},
+          radar: {
+            indicator: [
+              { name: '蜜罐风险', max: 100 },
+              { name: 'Rugpull', max: 100 },
+              { name: '所有者权限', max: 100 },
+              { name: '流动性风险', max: 100 },
+              { name: '代码质量', max: 100 }
+            ],
+            shape: 'polygon'
+          },
+          series: [{
+            type: 'radar',
+            data: [{
+              value: [
+                scores.honeypot_risk || 0,
+                scores.rugpull_risk || 0,
+                scores.owner_privilege || 0,
+                scores.liquidity_risk || 0,
+                scores.code_quality || 0
+              ],
+              name: '风险评分',
+              areaStyle: { opacity: 0.2 },
+              lineStyle: { width: 2 }
+            }]
+          }]
+        };
+        this.safeRender(chart, option);
+      },
+
+      renderGauge(chart, score, level) {
+        const colorMap = {
+          CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#eab308',
+          LOW: '#22c55e', SAFE: '#10b981'
+        };
+        const color = colorMap[level] || '#3b82f6';
+        const option = {
+          title: { text: '综合风险评分', left: 'center', textStyle: { fontSize: 14 } },
+          series: [{
+            type: 'gauge', min: 0, max: 100, radius: '80%',
+            axisLine: {
+              lineStyle: {
+                width: 20,
+                color: [[0.3, '#10b981'], [0.6, '#eab308'], [0.8, '#f97316'], [1, '#ef4444']]
+              }
+            },
+            pointer: { itemStyle: { color: 'auto' } },
+            axisTick: { distance: -20, length: 6, lineStyle: { color: '#fff', width: 1 } },
+            splitLine: { distance: -24, length: 16, lineStyle: { color: '#fff', width: 2 } },
+            axisLabel: { color: 'inherit', distance: 30, fontSize: 11 },
+            detail: {
+              valueAnimation: true, formatter: '{value}',
+              color: color, offsetCenter: [0, '-10%'], fontSize: 36, fontWeight: 'bold'
+            },
+            title: { offsetCenter: [0, '25%'], fontSize: 14, color: '#94a3b8' },
+            data: [{ value: score, name: level }]
+          }]
+        };
+        this.safeRender(chart, option);
+      },
+
+      FALLBACK_RADAR_OPTION: {
+        title: { text: '⚠️ 风险评分不可用', left: 'center' },
+        radar: {
+          indicator: [
+            { name: '蜜罐风险', max: 100 }, { name: 'Rugpull', max: 100 },
+            { name: '所有者权限', max: 100 }, { name: '流动性风险', max: 100 },
+            { name: '代码质量', max: 100 }
+          ]
+        },
+        series: [{
+          type: 'radar',
+          data: [{ value: [50, 50, 50, 50, 50], name: '数据不可用' }],
+          areaStyle: { opacity: 0.3 },
+          lineStyle: { type: 'dashed', color: '#999' }
+        }]
+      },
+
+      FALLBACK_GAUGE_OPTION: {
+        title: { text: '综合评分不可用', left: 'center', bottom: '10%',
+                 textStyle: { color: '#94a3b8', fontSize: 14 } },
+        series: [{
+          type: 'gauge', min: 0, max: 100, radius: '80%',
+          axisLine: { lineStyle: { width: 20, color: [[1, '#475569']] } },
+          pointer: { show: true, itemStyle: { color: '#64748b' } },
+          axisTick: { show: false }, splitLine: { show: false },
+          axisLabel: { show: false },
+          detail: { formatter: '?', color: '#94a3b8', offsetCenter: [0, '-10%'], fontSize: 32 },
+          data: [{ value: 50 }]
+        }]
+      },
+
+      renderFallback(charts) {
+        if (charts?.radar) this.safeRender(charts.radar, this.FALLBACK_RADAR_OPTION);
+        if (charts?.gauge) this.safeRender(charts.gauge, this.FALLBACK_GAUGE_OPTION);
+      }
+    };
+
+    function debounce(fn, delay = 150) {
+      let timer;
+      return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); };
+    }
+
+    // ResizeObserver 监听图表容器尺寸变化（覆盖浏览器缩放 + 窗口 resize）
+    function setupChartResizeObserver() {
+      const ro = new ResizeObserver(debounce(() => {
+        if (AppState.charts) {
+          AppState.charts.radar?.resize();
+          AppState.charts.gauge?.resize();
+        }
+      }, 100));
+      const radarDom = document.getElementById('radar-chart');
+      const gaugeDom = document.getElementById('gauge-chart');
+      if (radarDom) ro.observe(radarDom);
+      if (gaugeDom) ro.observe(gaugeDom);
+    }
+    setupChartResizeObserver();
+
+    window.addEventListener('resize', debounce(() => {
+      if (AppState.charts) {
+        AppState.charts.radar?.resize();
+        AppState.charts.gauge?.resize();
+      }
+    }));
+
+    // ===== [7] UI Renderer =====
+    // XSS 防护：HTML 实体转义
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return String(str);
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return str.replace(/[&<>"']/g, c => map[c]);
+    }
+
+    const UI = {
+      configureMarked() {
+        marked.use({
+          // 禁用原始 HTML 透传，强制转义
+          headerIds: false,
+          mangle: false,
+          renderer: {
+            code(code, infostring) {
+              const lang = infostring || 'solidity';
+              let highlighted;
+              try {
+                highlighted = hljs.getLanguage(lang)
+                  ? hljs.highlight(code, { language: lang }).value
+                  : hljs.highlightAuto(code).value;
+              } catch (e) { highlighted = escapeHtml(code); }
+              return `<pre class="hljs"><code class="language-${escapeHtml(lang)}">${highlighted}</code></pre>`;
+            },
+            // 转义所有非代码块文本
+            html(html) { return escapeHtml(html); }
+          }
+        });
+      },
+
+      updateProgress(text, percent) {
+        const progressContainer = document.getElementById('scan-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        progressContainer.classList.remove('hidden');
+        progressBar.style.width = `${percent || 0}%`;
+        progressText.textContent = text;
+      },
+
+      hideProgress() {
+        document.getElementById('scan-progress').classList.add('hidden');
+      },
+
+      showWarning(text) {
+        const banner = document.getElementById('warning-banner');
+        document.getElementById('warning-text').textContent = text;
+        banner.classList.remove('hidden');
+      },
+
+      hideWarning() {
+        document.getElementById('warning-banner').classList.add('hidden');
+      },
+
+      highlightCode(code) {
+        try {
+          return hljs.getLanguage('solidity')
+            ? hljs.highlight(code, { language: 'solidity' }).value
+            : hljs.highlightAuto(code).value;
+        } catch (e) { return code.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+      },
+
+      renderCards(data) {
+        const container = document.getElementById('cards-container');
+        container.innerHTML = '';
+        const severityColors = { CRITICAL: 'text-red-400', HIGH: 'text-orange-400', MEDIUM: 'text-yellow-400', LOW: 'text-blue-400' };
+
+        data.red_flags.forEach(flag => {
+          const card = document.createElement('div');
+          card.className = 'card card-red';
+          // 使用 textContent 构建标题（XSS 安全）
+          const header = document.createElement('div');
+          header.className = 'flex items-center justify-between mb-2';
+          const title = document.createElement('h3');
+          title.className = 'font-semibold text-red-300';
+          title.textContent = '🚩 ' + (flag.title || '');
+          const badge = document.createElement('span');
+          badge.className = `text-xs px-2 py-0.5 rounded ${severityColors[flag.severity] || 'text-gray-400'} bg-red-500/10`;
+          badge.textContent = flag.severity || '';
+          header.appendChild(title);
+          header.appendChild(badge);
+          card.appendChild(header);
+          // description 使用 textContent
+          const desc = document.createElement('p');
+          desc.className = 'text-sm text-gray-300 mb-2';
+          desc.textContent = flag.description || '';
+          card.appendChild(desc);
+          // code_snippet 使用 highlightCode（内部已做转义）
+          if (flag.code_snippet) {
+            const pre = document.createElement('pre');
+            pre.className = 'hljs';
+            const code = document.createElement('code');
+            code.className = 'language-solidity';
+            code.innerHTML = this.highlightCode(flag.code_snippet);
+            pre.appendChild(code);
+            card.appendChild(pre);
+          }
+          // recommendation 使用 textContent
+          const rec = document.createElement('p');
+          rec.className = 'text-xs text-green-400 mt-2';
+          rec.textContent = '💡 ' + (flag.recommendation || '');
+          card.appendChild(rec);
+          container.appendChild(card);
+        });
+
+        data.green_passes.forEach(pass => {
+          const card = document.createElement('div');
+          card.className = 'card card-green';
+          const title = document.createElement('h3');
+          title.className = 'font-semibold text-green-300 mb-2';
+          title.textContent = '✅ ' + (pass.title || '');
+          const desc = document.createElement('p');
+          desc.className = 'text-sm text-gray-300';
+          desc.textContent = pass.description || '';
+          card.appendChild(title);
+          card.appendChild(desc);
+          container.appendChild(card);
+        });
+      },
+
+      assembleReport(data) {
+        let md = `# 🔍 智能合约安全审计报告\n\n`;
+        md += `## 综合评分: ${data.risk_score}/100 (${data.risk_level})\n\n`;
+        md += `> ${data.summary}\n\n`;
+        md += `## 🚩 红牌警告 (${data.red_flags.length})\n`;
+        data.red_flags.forEach(f => {
+          md += `### ${f.title}\n`;
+          md += `**严重性**: ${f.severity}\n\n`;
+          md += `${f.description}\n\n`;
+          // 强制 code_snippet 为字符串，防止 [object Object]
+          const snippet = typeof f.code_snippet === 'string' ? f.code_snippet : '';
+          if (snippet) md += `\`\`\`solidity\n${snippet}\n\`\`\`\n\n`;
+          md += `**修复建议**: ${f.recommendation}\n\n`;
+        });
+        md += `## ✅ 绿牌通过 (${data.green_passes.length})\n`;
+        data.green_passes.forEach(p => {
+          md += `### ${p.title}\n${p.description}\n\n`;
+        });
+        return md;
+      },
+
+      renderReport(markdown) {
+        const container = document.getElementById('report-content');
+        const rawHtml = marked.parse(markdown);
+        // DOMPurify 净化：白名单标签/属性，移除所有脚本和事件
+        const cleanHtml = DOMPurify.sanitize(rawHtml, {
+          ALLOWED_TAGS: ['h1','h2','h3','h4','h5','h6','blockquote','p','a','ul','ol','li','b','i','strong','em','code','pre','table','thead','tbody','tr','th','td','hr','br','div','span'],
+          ALLOWED_ATTR: ['href','class','id','target'],
+          ALLOW_DATA_ATTR: false
+        });
+        container.innerHTML = cleanHtml;
+        container.querySelectorAll('pre code').forEach(block => {
+          try { hljs.highlightElement(block); } catch (e) {}
+        });
+      },
+
+      showResults() {
+        document.getElementById('results-panel').style.display = 'block';
+      },
+
+      setScanButtonState(disabled, text) {
+        const btn = document.getElementById('btn-scan');
+        btn.disabled = disabled;
+        if (text) btn.textContent = text;
+      }
+    };
+
+    UI.configureMarked();
+
+    // ===== [8] Main Controller =====
+    const Controller = {
+      initTabs() {
+        const tabs = document.querySelectorAll('[data-tab]');
+        const tabAuto = document.getElementById('tab-auto');
+        const tabManual = document.getElementById('tab-manual');
+        tabs.forEach(tab => {
+          tab.addEventListener('click', () => {
+            tabs.forEach(t => { t.classList.remove('tab-active'); t.classList.add('tab-inactive'); });
+            tab.classList.remove('tab-inactive');
+            tab.classList.add('tab-active');
+            if (tab.dataset.tab === 'auto') {
+              tabAuto.classList.remove('hidden');
+              tabManual.classList.add('hidden');
+            } else {
+              tabAuto.classList.add('hidden');
+              tabManual.classList.remove('hidden');
+            }
+          });
+        });
+      },
+
+      async getContractFiles() {
+        const activeTab = document.querySelector('[data-tab].tab-active').dataset.tab;
+        if (activeTab === 'auto') {
+          const chainId = parseInt(document.getElementById('select-chain').value);
+          const address = document.getElementById('input-address').value.trim();
+          if (!address) throw new Error('请输入合约地址');
+          if (!/^0x[a-fA-F0-9]{40}$/.test(address)) throw new Error('合约地址格式无效，应为 0x 开头的 42 位十六进制');
+          return API.fetchContractSource(chainId, address);
+        } else {
+          const source = document.getElementById('input-source').value.trim();
+          if (!source) throw new Error('请粘贴 Solidity 源码');
+          return Parser.parseManualInput(source);
+        }
+      },
+
+      _scanning: false,
+
+      async startScan() {
+        if (this._scanning) return;
+        this._scanning = true;
+
+        const btn = document.getElementById('btn-scan');
+        UI.setScanButtonState(true, '⏳ 扫描中...');
+        UI.hideWarning();
+
+        try {
+          UI.updateProgress('正在获取合约源码...', 10);
+          AppState.scan.status = 'fetching';
+          const files = await this.getContractFiles();
+          AppState.scan.contractFiles = files;
+
+          UI.updateProgress('正在解析依赖关系...', 30);
+          AppState.scan.status = 'parsing';
+          const merged = Parser.mergeFiles(files);
+          AppState.scan.mergedSource = merged;
+
+          const tokens = Parser.estimateTokens(merged);
+          UI.updateProgress(`源码已合并 (${tokens.toLocaleString()} tokens)，正在调用 AI 分析...`, 50);
+          if (tokens > CONFIG.TOKEN_WARN_THRESHOLD) {
+            UI.showWarning(`合约源码约 ${tokens.toLocaleString()} tokens，接近上下文限制，分析结果可能不完整`);
+          }
+
+          AppState.scan.status = 'analyzing';
+          UI.updateProgress('AI 正在深度审计合约...（可能需要 30-120 秒）', 60);
+          const result = await Analyzer.scan(merged);
+          AppState.scan.renderMode = result.mode;
+          AppState.scan.parsedResult = result.data;
+          AppState.scan.aiResponse = result.raw;
+
+          UI.updateProgress('正在渲染分析结果...', 90);
+          AppState.charts = Charts.init();
+
+          if (result.mode === 'json' && result.data) {
+            // 图表渲染（空值保护）
+            if (AppState.charts?.radar) {
+              Charts.renderRadar(AppState.charts.radar, result.data.category_scores);
+            }
+            if (AppState.charts?.gauge) {
+              Charts.renderGauge(AppState.charts.gauge, result.data.risk_score, result.data.risk_level);
+            }
+            // 报告渲染（与图表解耦，独立执行）
+            UI.renderCards(result.data);
+            const report = UI.assembleReport(result.data);
+            UI.renderReport(report);
+          } else {
+            // 降级路径（图表空值保护）
+            if (AppState.charts) {
+              Charts.renderFallback(AppState.charts);
+            }
+            UI.showWarning('AI 返回格式异常，以下为原始分析报告');
+            UI.renderReport(result.raw);
+            document.getElementById('cards-container').innerHTML = '';
+          }
+
+          UI.updateProgress('扫描完成！', 100);
+          AppState.scan.status = 'done';
+          UI.showResults();
+          document.getElementById('results-panel').scrollIntoView({ behavior: 'smooth' });
+
+        } catch (error) {
+          AppState.scan.status = 'error';
+          AppState.scan.error = error.message;
+          UI.showWarning(`扫描失败: ${error.message}`);
+          UI.showResults();
+          console.error('扫描错误:', error);
+        } finally {
+          UI.setScanButtonState(false, '🚀 开始扫描');
+          UI.hideProgress();
+          this._scanning = false;
+        }
+      },
+
+      init() {
+        this.initTabs();
+
+        document.getElementById('select-chain').value = String(AppState.config.selectedChain);
+        document.getElementById('select-chain').addEventListener('change', (e) => {
+          AppState.config.selectedChain = parseInt(e.target.value);
+          Storage.saveConfig(AppState.config);
+        });
+
+        document.getElementById('btn-scan').addEventListener('click', () => this.startScan());
+
+        document.getElementById('btn-add-file').addEventListener('click', () => {
+          const textarea = document.getElementById('input-source');
+          textarea.value += '\n\n=== File: NewContract.sol ===\n\n';
+          textarea.focus();
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        });
+
+        if (!AppState.config.mimoApiKey) {
+          console.warn('未配置 MiMo API Key，请点击齿轮图标设置');
+        }
+      }
+    };
+
+    Controller.init();
+  })();
+  </script>
+</body>
+</html>
